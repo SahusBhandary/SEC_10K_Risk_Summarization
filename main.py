@@ -5,6 +5,7 @@ from langchain_community.vectorstores import Chroma
 from langchain_openai import OpenAIEmbeddings
 from api import get_risk_factors
 from vector import store_filing
+from summarizer import summarize_chunks
 
 VECTORSTORE = Chroma(
     persist_directory="./chroma_db",
@@ -50,6 +51,8 @@ def main():
         break
 
     # Check cache and fetch missing years
+    all_chunks: list[tuple[dict, str]] = []
+
     for year in range(int(start_year), int(end_year) + 1):
         chunks = get_cached_chunks(ticker, year)
 
@@ -67,10 +70,32 @@ def main():
         else:
             print(f"[{ticker} {year}] Loaded {len(chunks)} chunks from cache.")
 
-        for i, (meta, body) in enumerate(chunks):
-            print(f"\n--- [{ticker} {year}] Chunk {i + 1} | {meta.get('category', '')} | {meta.get('word_count', '')} words ---")
-            print(f"HEADER: {meta.get('header', '')}")
-            print(f"BODY:   {body}")
+        # for i, (meta, body) in enumerate(chunks):
+        #     print(f"\n--- [{ticker} {year}] Chunk {i + 1} | {meta.get('category', '')} | {meta.get('word_count', '')} words ---")
+        #     print(f"HEADER: {meta.get('header', '')}")
+        #     print(f"BODY:   {body}")
+
+        all_chunks.extend(chunks)
+
+    # Summarize all chunks with zero-shot and few-shot prompting
+    if not all_chunks:
+        return
+
+    print(f"\n{'='*60}")
+    print(f"SUMMARIZATION — {ticker} {start_year}–{end_year}")
+    print(f"{'='*60}")
+
+    results = summarize_chunks(all_chunks)
+
+    for r in results:
+        flagged_zs = " ⚠ LOW" if r["zero_shot_flagged"] else ""
+        flagged_fs = " ⚠ LOW" if r["few_shot_flagged"] else ""
+        print(f"\n[{r['ticker']} {r['year']}] {r['chunk_id']} | {r['category']}")
+        print(f"  Header:     {r['header']}")
+        print(f"  Zero-Shot:  {r['zero_shot_summary']}")
+        print(f"              BERTScore F1: {r['zero_shot_bertscore_f1']}{flagged_zs}")
+        print(f"  Few-Shot:   {r['few_shot_summary']}")
+        print(f"              BERTScore F1: {r['few_shot_bertscore_f1']}{flagged_fs}")
 
 
 if __name__ == "__main__":
