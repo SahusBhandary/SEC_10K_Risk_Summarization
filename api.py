@@ -59,7 +59,7 @@ def get_risk_factors(ticker: str, year: int) -> str | None:
     # Step 4: Extract Item 1A (Risk Factors) section
     # Use findall to get all matches (TOC + actual section), then take the longest
     matches = re.findall(
-        r"Item\s+1A\.?\s*Risk\s+Factors(.*?)(?:Item\s+1B\.|Item\s+2\.)",
+        r"Item\s+1A\.?\s*Risk\s+Factors(.*?)(?:Item\s+1B\.|\n\s*Item\s+2\.)",
         text,
         re.DOTALL | re.IGNORECASE,
     )
