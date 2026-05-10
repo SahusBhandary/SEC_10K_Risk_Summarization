@@ -4,7 +4,7 @@ from bs4 import BeautifulSoup
 
 HEADERS = {"User-Agent": "sahusbhandary04@gmail.com"}
 
-def get_risk_factors(ticker: str, year: int) -> str | None:
+def get_risk_factors(ticker: str, year: int) -> tuple[str, str] | None:
     ticker = ticker.upper()
 
     # Step 1: Resolve ticker to CIK
@@ -29,11 +29,29 @@ def get_risk_factors(ticker: str, year: int) -> str | None:
     if response.status_code != 200:
         return None
 
-    filings = response.json().get("filings", {}).get("recent", {})
-    forms = filings.get("form", [])
-    accession_numbers = filings.get("accessionNumber", [])
-    primary_documents = filings.get("primaryDocument", [])
-    filing_dates = filings.get("filingDate", [])
+    submissions_data = response.json()
+    recent = submissions_data.get("filings", {}).get("recent", {})
+    forms = list(recent.get("form", []))
+    accession_numbers = list(recent.get("accessionNumber", []))
+    primary_documents = list(recent.get("primaryDocument", []))
+    filing_dates = list(recent.get("filingDate", []))
+
+    # If the target year isn't in the recent list, fetch paginated older filings
+    if not any(form == "10-K" and date.startswith(str(year))
+               for form, date in zip(forms, filing_dates)):
+        for extra_file in submissions_data.get("filings", {}).get("files", []):
+            extra_url = f"https://data.sec.gov/submissions/{extra_file['name']}"
+            extra_resp = requests.get(extra_url, headers=HEADERS)
+            if extra_resp.status_code != 200:
+                continue
+            extra = extra_resp.json()
+            forms += extra.get("form", [])
+            accession_numbers += extra.get("accessionNumber", [])
+            primary_documents += extra.get("primaryDocument", [])
+            filing_dates += extra.get("filingDate", [])
+            if any(form == "10-K" and date.startswith(str(year))
+                   for form, date in zip(extra.get("form", []), extra.get("filingDate", []))):
+                break
 
     ten_k_index = next(
         (
@@ -66,4 +84,60 @@ def get_risk_factors(ticker: str, year: int) -> str | None:
     if not matches:
         return None
 
-    return max(matches, key=len).strip()
+    filing_date = filing_dates[ten_k_index]
+    return max(matches, key=len).strip(), filing_date
+
+
+def get_filing_date(ticker: str, year: int) -> str | None:
+    ticker = ticker.upper()
+
+    tickers_url = "https://www.sec.gov/files/company_tickers.json"
+    response = requests.get(tickers_url, headers=HEADERS)
+    if response.status_code != 200:
+        return None
+
+    tickers_data = response.json()
+    cik = None
+    for entry in tickers_data.values():
+        if entry["ticker"] == ticker:
+            cik = str(entry["cik_str"]).zfill(10)
+            break
+
+    if cik is None:
+        return None
+
+    submissions_url = f"https://data.sec.gov/submissions/CIK{cik}.json"
+    response = requests.get(submissions_url, headers=HEADERS)
+    if response.status_code != 200:
+        return None
+
+    submissions_data = response.json()
+    recent = submissions_data.get("filings", {}).get("recent", {})
+    forms = list(recent.get("form", []))
+    filing_dates = list(recent.get("filingDate", []))
+
+    if not any(form == "10-K" and date.startswith(str(year))
+               for form, date in zip(forms, filing_dates)):
+        for extra_file in submissions_data.get("filings", {}).get("files", []):
+            extra_url = f"https://data.sec.gov/submissions/{extra_file['name']}"
+            extra_resp = requests.get(extra_url, headers=HEADERS)
+            if extra_resp.status_code != 200:
+                continue
+            extra = extra_resp.json()
+            forms += extra.get("form", [])
+            filing_dates += extra.get("filingDate", [])
+            if any(form == "10-K" and date.startswith(str(year))
+                   for form, date in zip(extra.get("form", []), extra.get("filingDate", []))):
+                break
+
+    ten_k_index = next(
+        (
+            i for i, (form, date) in enumerate(zip(forms, filing_dates))
+            if form == "10-K" and date.startswith(str(year))
+        ),
+        None,
+    )
+    if ten_k_index is None:
+        return None
+
+    return filing_dates[ten_k_index]

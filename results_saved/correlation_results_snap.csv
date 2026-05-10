@@ -1,0 +1,4 @@
+ticker,year_a,year_b,net_risk_score,escalated,de_escalated,filing_date,return_30d
+SNAP,2020,2021,23,23,0,2021-02-05,-0.168919
+SNAP,2021,2022,39,39,0,2022-02-04,-0.223336
+SNAP,2022,2023,128,128,0,2023-02-01,0.027001

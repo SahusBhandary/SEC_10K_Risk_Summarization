@@ -10,6 +10,20 @@ from bert_score import BERTScorer
 _LLM = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 _SCORER = BERTScorer(lang="en")
 
+_OLLAMA_BASE = "http://localhost:11434/v1"
+
+# Extra local models available via Ollama. Key is used as column prefix in results.
+EXTRA_MODELS: dict[str, tuple[str, ChatOpenAI]] = {
+    "llama": (
+        "Llama 3.1 8B",
+        ChatOpenAI(model="llama3.1:8b", base_url=_OLLAMA_BASE, api_key="ollama", temperature=0),
+    ),
+    "mistral": (
+        "Mistral 7B v0.3",
+        ChatOpenAI(model="mistral:v0.3", base_url=_OLLAMA_BASE, api_key="ollama", temperature=0),
+    ),
+}
+
 _ZERO_SHOT_TEMPLATE = (
     "Summarize the following 10-K risk factor in plain English "
     "for a non-expert investor in 1-2 sentences.\n\n{chunk}"
@@ -51,13 +65,13 @@ def _build_few_shot_prompt(chunk: str) -> str:
     )
 
 
-def summarize(chunk_text: str, method: str = "zero_shot") -> str:
+def summarize(chunk_text: str, method: str = "zero_shot", llm=None) -> str:
     prompt = (
         _ZERO_SHOT_TEMPLATE.format(chunk=chunk_text)
         if method == "zero_shot"
         else _build_few_shot_prompt(chunk_text)
     )
-    return _LLM.invoke(prompt).content.strip()
+    return (llm or _LLM).invoke(prompt).content.strip()
 
 
 def bertscore(summary: str, source: str) -> dict[str, float]:
@@ -73,9 +87,11 @@ def summarize_chunks(
     chunks: list[tuple[dict, str]],
     methods: tuple[str, ...] = ("zero_shot", "few_shot"),
     flag_threshold: float = 0.85,
+    extra_models: tuple[str, ...] = (),
 ) -> list[dict]:
+    model_count = 1 + len(extra_models)
     total = len(chunks)
-    print(f"Summarizing {total} chunks ({len(methods)} methods each)...")
+    print(f"Summarizing {total} chunks ({len(methods)} methods × {model_count} models)...")
 
     results = []
     for i, (meta, body) in enumerate(chunks, 1):
@@ -91,12 +107,34 @@ def summarize_chunks(
             "word_count": meta.get("word_count"),
             "body": body,
         }
+
+        # GPT-4o-mini (primary — keys have no model prefix for backward compat)
         for method in methods:
             summary = summarize(body, method)
             scores = bertscore(summary, body)
             entry[f"{method}_summary"] = summary
+            entry[f"{method}_bertscore_precision"] = scores["precision"]
+            entry[f"{method}_bertscore_recall"] = scores["recall"]
             entry[f"{method}_bertscore_f1"] = scores["f1"]
             entry[f"{method}_flagged"] = scores["f1"] < flag_threshold
+
+        # Extra local models (keys prefixed with model key)
+        for model_key in extra_models:
+            if model_key not in EXTRA_MODELS:
+                print(f"    Unknown model key '{model_key}', skipping.", flush=True)
+                continue
+            display_name, llm = EXTRA_MODELS[model_key]
+            try:
+                for method in methods:
+                    summary = summarize(body, method, llm=llm)
+                    scores = bertscore(summary, body)
+                    entry[f"{model_key}_{method}_summary"] = summary
+                    entry[f"{model_key}_{method}_bertscore_precision"] = scores["precision"]
+                    entry[f"{model_key}_{method}_bertscore_recall"] = scores["recall"]
+                    entry[f"{model_key}_{method}_bertscore_f1"] = scores["f1"]
+                    entry[f"{model_key}_{method}_flagged"] = scores["f1"] < flag_threshold
+            except Exception as e:
+                print(f"    [{display_name}] failed — is Ollama running? ({e})", flush=True)
 
         results.append(entry)
 

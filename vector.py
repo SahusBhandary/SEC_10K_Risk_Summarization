@@ -112,6 +112,14 @@ def _is_topic_header(line: str) -> bool:
     return any(line.startswith(s) for s in _OTHER_TOPIC_STARTERS)
 
 
+def _extract_header(para: str) -> str:
+    clean = ' '.join(para.split())
+    first_dot = clean.find('.')
+    if first_dot < 30:
+        return clean[:120]
+    return clean[:first_dot + 1]
+
+
 def _flush(chunks: list, header: str | None, body_lines: list, section: str):
     if not header or not body_lines:
         return
@@ -166,8 +174,37 @@ def chunk_filing(filing_text: str) -> list[dict]:
         if not any(p in c["header"].lower() for p in _BOILERPLATE)
     ]
 
-    # Fallback: no topic headers detected — store the whole section as one chunk
-    if not merged:
+    # Fallback: no/single topic header detected — try paragraph splitting first
+    if len(merged) <= 1:
+        paragraphs = [p.strip() for p in re.split(r'\n{2,}', text) if len(p.split()) >= 50]
+        if len(paragraphs) > 1:
+            fallback_chunks = []
+            for para in paragraphs:
+                fallback_chunks.append({
+                    "header": _extract_header(para)[:300],
+                    "body": para,
+                    "category": "Risk Factors",
+                })
+            return fallback_chunks
+
+        # iXBRL / single-newline text: use a sliding window
+        words = text.split()
+        if len(words) > 300:
+            window, step = 500, 450
+            fallback_chunks = []
+            for i in range(0, len(words), step):
+                sub_words = words[i:i + window]
+                if len(sub_words) < 50:
+                    continue
+                sub_body = ' '.join(sub_words)
+                fallback_chunks.append({
+                    "header": _extract_header(sub_body)[:300],
+                    "body": sub_body,
+                    "category": "Risk Factors",
+                })
+            if fallback_chunks:
+                return fallback_chunks
+
         return [{"header": "Risk Factors", "body": text, "category": "Risk Factors"}]
 
     return merged

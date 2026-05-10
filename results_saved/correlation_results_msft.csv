@@ -1,0 +1,5 @@
+ticker,year_a,year_b,net_risk_score,escalated,de_escalated,filing_date,return_30d
+MSFT,2019,2020,0,0,0,2020-07-30,0.125372
+MSFT,2020,2021,13,13,0,2021-07-29,0.048146
+MSFT,2021,2022,20,20,0,2022-07-28,-0.028042
+MSFT,2022,2023,0,0,0,2023-07-27,-0.021336
